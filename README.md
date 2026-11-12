@@ -295,9 +295,90 @@ Improvements I would make: private subnets with a security group that only accep
 | Employee image rebuilt and pushed to ECR | New image ID, layers pushed; the employee pipeline started automatically |
 | `curl` to `/admin/suppliers` from Cloud9 (different source IP) | 404 page titled "Coffee suppliers", confirming the IP restriction |
 | Customer service scaled to 3 tasks | 3/3 tasks running; employee service 1/1; both deployments Succeeded |
+| Target group health | `customer-tg-one` reported 3 healthy targets across two Availability Zones; `employee-microservice` reported 1 healthy target |
+| CodeDeploy deployment | All five steps and all lifecycle events Succeeded; 100% of the traffic on the replacement task set |
 
 ## Screenshots
 
+All captures come from my AWS Academy lab session. Account identifiers, public addresses, the database endpoint and repository URIs were hidden before publishing.
+
+### Development environment
+
+![EC2 instances: Cloud9 and the monolith server](screenshots/ec2-instances.png)
+
+The two EC2 instances used in the lab, both running in `us-east-1a`: the Cloud9 instance (`t3.small`) and the `MonolithicAppServer` (`t2.micro`) that hosts the original monolith. Public addresses are hidden.
+
+![Cloud9 environment with the deployment files](screenshots/cloud9-deployment-files.png)
+
+The Cloud9 environment `MicroservicesIDE`. The `deployment` folder holds the AppSpec files, the task definition files and the ECS service JSON files; the `microservices` folder holds the `customer` and `employee` services with their Dockerfiles. The open task definition shows the `IMAGE1_NAME` image placeholder, the port mapping on 8080 and the CloudWatch log configuration (log group `awslogs-capstone`). The database endpoint is hidden.
+
+### Container registry
+
+![Amazon ECR private repositories](screenshots/ecr-repositories.png)
+
+The two private ECR repositories, `customer` and `employee` (tag immutability off, AES-256 encryption). Repository URIs are hidden.
+
+![Image stored in the customer repository](screenshots/ecr-customer-image.png)
+
+The `customer` repository holds one image tagged `latest`. Its digest starts with `sha256:217d4ff068`, the same digest shown by the customer pipeline below.
+
+### Load balancer and target groups
+
+![Application Load Balancer microservicesLB](screenshots/load-balancer.png)
+
+`microservicesLB`: application load balancer, internet-facing, IPv4, state Active, spanning two Availability Zones.
+
+![Target group customer-tg-one with healthy targets](screenshots/target-group-customer-tg-one.png)
+
+The target group `customer-tg-one` (type IP, HTTP on port 8080) attached to `microservicesLB`: 3 registered targets, all healthy, spread over two Availability Zones (`us-east-1a` and `us-east-1b`).
+
+### ECS on Fargate
+
+![ECS cluster and services](screenshots/ecs-services-running.png)
+
+The cluster `microservices-serverlesscluster` with two active Fargate services: `customer-microservice` at 3/3 tasks running and `employee-microservice` at 1/1, both with last deployment Succeeded. This is the result of scaling the customer service independently. The cluster ARN is hidden.
+
+![Employee service health](screenshots/ecs-employee-service-health.png)
+
+The health view of `employee-microservice`: the load balancer target group reports 1 healthy and 0 unhealthy targets, alongside CPU and memory utilization charts.
+
+### CI/CD pipelines
+
+![CodePipeline first run: Source succeeded, Deploy failed](screenshots/codepipeline-first-run.png)
+
+The first execution of `update-customer-microservice`: the source stage succeeded and the deploy stage failed as expected, because the Amazon ECR source action and the `IMAGE1_NAME` image substitution had not yet been configured.
+
+![Pipelines list](screenshots/codepipeline-pipelines-list.png)
+
+Both pipelines with a latest execution of Succeeded. The source revisions show the ECR image digest and the CodeCommit commit of the deployment files. The older failed runs in the execution history correspond to the initial runs before the configuration was complete.
+
+![Customer pipeline](screenshots/codepipeline-customer.png)
+
+`update-customer-microservice`: the Source stage has two actions (Image from Amazon ECR, Source from AWS CodeCommit) and the Deploy stage uses Amazon ECS (Blue/Green). All actions succeeded.
+
+![Employee pipeline](screenshots/codepipeline-employee.png)
+
+`update-employee-microservice`: same structure, all actions succeeded. The image digest shown (`sha256:8a70458542dc`) matches the digest returned when I pushed the updated employee image to ECR.
+
+### Blue/green deployment with CodeDeploy
+
+![CodeDeploy deployment details](screenshots/codedeploy-deployment-details.png)
+
+A deployment of the application `microservices` to the deployment group `microservices-employee`, using `CodeDeployDefault.ECSAllAtOnce`. The status is Succeeded and the traffic shifting panel shows 0% on the original task set and 100% on the replacement.
+
+![CodeDeploy deployment steps](screenshots/codedeploy-deployment-steps.png)
+
+The five deployment steps all succeeded: deploy the replacement task set, set up the test traffic route, reroute production traffic, wait, and terminate the original task set.
+
+![CodeDeploy task sets and lifecycle events](screenshots/codedeploy-lifecycle-events.png)
+
+The task set activity (the replacement task set is PRIMARY and receives 100% of the traffic) and the lifecycle events from `BeforeInstall` to `AfterAllowTraffic`, all Succeeded. The `Install` event, which starts the replacement tasks, took 1 minute 42 seconds.
+
+### Application interface
+
+![Employee microservice at /admin/suppliers](screenshots/employee-admin-page.png)
+
+The employee microservice served at the `/admin/suppliers` path through the Application Load Balancer. It lists the suppliers and offers the edit and "Add a new supplier" controls, which the customer service does not have.
 
 ## Skills gained
 
@@ -325,7 +406,6 @@ This project took a monolithic application to two independently deployable micro
 The main limits are those of a lab environment: manual image builds, HTTP only, public subnets and a shared database. Next steps would be an automated build stage with commit-based image tags, infrastructure as code, secrets management, HTTPS with private subnets, auto scaling and monitoring alarms.
 
 Source of the exercise: the AWS Academy lab guide *Building Microservices and a CI/CD Pipeline with AWS*.
-
 
 ## AWS Academy Certificate
 
